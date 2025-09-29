@@ -90,7 +90,7 @@
         </main>
 
         <footer class="text-center mt-12">
-            <p class="text-sm text-gray-500">Data provided by the <a href="https://transparency.entsoe.eu/" target="_blank" rel="noopener noreferrer" class="underline hover:text-blue-400">ENTSO-E Transparency Platform</a>.</p>
+            <p class="text-sm text-gray-500">Data provided by the <a href="https://transparency.entsoe.eu/" target="_blank" rel="noopener noreferrer" class="underline hover:text-blue-400">ENTSO-E Transparency Platform</a>. Dashboard by <a href="https://github.com/jfperaita" target="_blank" rel="noopener noreferrer" class="underline hover:text-blue-400">jfperaita</a>.</p>
         </footer>
     </div>
 
@@ -126,11 +126,11 @@
             'B05': { name: 'Fossil Hard coal', color: '#374151' }, // gray-700
             'B06': { name: 'Fossil Oil', color: '#1f2937' }, // gray-800
             'B08': { name: 'Fossil Peat', color: '#44403c' }, // stone-700
-             // Combine Fossil types for simplicity if needed
+            // Combine Fossil types for simplicity if needed
             'Fossil': { name: 'Fossil Fuels', color: '#78716c' },
-             // Combine Hydro types
+            // Combine Hydro types
             'Hydro': { name: 'Hydro', color: '#2563eb'},
-             // Combine Wind types
+            // Combine Wind types
             'Wind': { name: 'Wind', color: '#22d3ee' },
             'Other': { name: 'Other', color: '#a8a29e' } // stone-400
         };
@@ -162,8 +162,11 @@
 
             const { start, end } = getApiDateRange();
             const domain = '10YES-REE------0'; // Spain
+
+            // Fix: add interval parameter
+            const interval = 'PT60M'; // 60 minutes, can try PT15M for 15min if needed
             const proxyUrl = 'https://api.allorigins.win/raw?url=';
-            const apiUrl = `https://web-api.tp.entsoe.eu/api?securityToken=${SECURITY_TOKEN}&documentType=A75&processType=A16&in_Domain=${domain}&periodStart=${start}&periodEnd=${end}`;
+            const apiUrl = `https://web-api.tp.entsoe.eu/api?securityToken=${SECURITY_TOKEN}&documentType=A75&processType=A16&in_Domain=${domain}&periodStart=${start}&periodEnd=${end}&interval=${interval}`;
 
             try {
                 const response = await fetch(proxyUrl + encodeURIComponent(apiUrl));
@@ -205,10 +208,10 @@
         }
 
         function processAndDisplayData(data) {
-             const aggregatedData = {
+            const aggregatedData = {
                 'Solar': 0, 'Wind': 0, 'Hydro': 0, 'Biomass': 0, 'Nuclear': 0, 
                 'Fossil Fuels': 0, 'Geothermal': 0, 'Other': 0
-             };
+            };
 
             data.forEach(item => {
                 if (item.type.includes('Solar')) aggregatedData['Solar'] += item.value;
@@ -264,8 +267,8 @@
             const labels = data.map(item => item.name);
             const values = data.map(item => item.value);
             const colors = data.map(item => {
-                 const typeInfo = Object.values(generationTypeMapping).find(t => t.name === item.name);
-                 return typeInfo ? typeInfo.color : '#a8a29e';
+                const typeInfo = Object.values(generationTypeMapping).find(t => t.name === item.name);
+                return typeInfo ? typeInfo.color : '#a8a29e';
             });
             
             const chartData = {
