@@ -191,7 +191,11 @@
         async function fetchApiData(documentType, periodStart, periodEnd) {
             const domain = '10YES-REE------0'; // Spain
             const proxyUrl = 'https://api.allorigins.win/raw?url=';
-            const apiUrl = `https://web-api.tp.entsoe.eu/api?securityToken=${SECURITY_TOKEN}&documentType=${documentType}&processType=A16&in_Domain=${domain}&periodStart=${periodStart}&periodEnd=${periodEnd}`;
+            
+            // The domain parameter name changes based on the document type
+            const domainParamKey = (documentType === 'A65') ? 'outBiddingZone_Domain' : 'in_Domain';
+
+            const apiUrl = `https://web-api.tp.entsoe.eu/api?securityToken=${SECURITY_TOKEN}&documentType=${documentType}&processType=A16&${domainParamKey}=${domain}&periodStart=${periodStart}&periodEnd=${periodEnd}`;
 
             const response = await fetch(proxyUrl + encodeURIComponent(apiUrl));
             if (!response.ok) throw new Error(`Network error: ${response.statusText} (Code: ${response.status})`);
