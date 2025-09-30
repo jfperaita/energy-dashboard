@@ -57,6 +57,15 @@
                     </div>
                 </div>
 
+                <!-- Investment Insight -->
+                <div id="investment-insight-card" class="bg-gray-800 p-4 md:p-6 rounded-2xl mb-8 border-2 border-amber-500/50">
+                    <h3 class="text-xl font-semibold mb-4 text-amber-400 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+                        Data-Driven Insight
+                    </h3>
+                    <p id="investment-insight-text" class="text-gray-300 leading-relaxed text-lg">Analyzing data...</p>
+                </div>
+
                 <!-- Bottom Row: Installed Capacity -->
                 <div class="bg-gray-800 p-4 md:p-6 rounded-2xl">
                     <h3 class="text-xl font-semibold mb-4 text-center text-white">Installed Generation Capacity</h3>
@@ -92,6 +101,7 @@
         const lastUpdatedEl = document.getElementById('last-updated');
         const dailyMixCanvas = document.getElementById('dailyMixChart');
         const capacityCanvas = document.getElementById('capacityChart');
+        const investmentInsightText = document.getElementById('investment-insight-text');
         let dailyMixChart = null;
         let capacityChart = null;
 
@@ -174,6 +184,7 @@
 
                 const timeSeriesData = processTimeSeriesData(generationXml, loadXml);
                 updateDailyMixChart(timeSeriesData);
+                updateInvestmentInsight(timeSeriesData);
                 
                 const capacityData = processCapacityData(capacityXml);
                 updateCapacityChart(capacityData);
@@ -202,7 +213,7 @@
                     return category;
                 }
             }
-            return 'Other'; // Default for Geothermal, Waste, Other renewable, etc.
+            return 'Other';
         }
 
         function processTimeSeriesData(generationXml, loadXml) {
@@ -325,6 +336,49 @@
             } else {
                 dailyMixChart = new Chart(dailyMixCanvas, { type: 'line', data: chartData, options: chartOptions });
             }
+        }
+
+        function updateInvestmentInsight({ labels, datasets, loadData }) {
+            const solarData = datasets['Solar'];
+            if (!solarData || solarData.length === 0) {
+                investmentInsightText.textContent = "Insufficient solar data to generate an insight.";
+                return;
+            }
+
+            const maxSolarValue = Math.max(...solarData);
+            const maxSolarIndex = solarData.indexOf(maxSolarValue);
+            const maxSolarTime = labels[maxSolarIndex];
+
+            let eveningPeakLoad = 0;
+            let eveningPeakIndex = -1;
+
+            labels.forEach((label, index) => {
+                // Look for peak load between 6 PM and 10 PM
+                if (label.getHours() >= 18 && label.getHours() <= 22) {
+                    if (loadData[index] > eveningPeakLoad) {
+                        eveningPeakLoad = loadData[index];
+                        eveningPeakIndex = index;
+                    }
+                }
+            });
+
+            if (eveningPeakIndex === -1 || maxSolarValue < 1000) { // check for meaningful solar production
+                 investmentInsightText.innerHTML = `At present, the data doesn't indicate a strong arbitrage opportunity between solar production and evening demand. This could be due to low solar output or atypical consumption patterns.`;
+                 return;
+            }
+
+            const eveningPeakTime = labels[eveningPeakIndex];
+            const solarAtEveningPeak = solarData[eveningPeakIndex];
+            
+            const formatTime = (date) => date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const formatPower = (mw) => `${(mw / 1000).toFixed(2)} GW`;
+
+            investmentInsightText.innerHTML = `
+                Today at <b class="text-amber-300">${formatTime(maxSolarTime)}</b>, solar power generation peaked at <b class="text-amber-300">${formatPower(maxSolarValue)}</b>.
+                Later, evening energy demand is projected to peak at <b class="text-sky-300">${formatPower(eveningPeakLoad)}</b> around <b class="text-sky-300">${formatTime(eveningPeakTime)}</b>, when solar generation will be near zero.
+                <br><br>
+                This highlights a significant opportunity for <b class="text-white">energy storage solutions</b>. Capturing the excess solar energy from midday could satisfy a large portion of the evening demand, stabilizing the grid and creating value.
+            `;
         }
         
         function processCapacityData(xmlDoc) {
