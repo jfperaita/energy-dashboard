@@ -194,7 +194,6 @@
             const proxyUrl = 'https://api.allorigins.win/raw?url=';
             
             const domainParamKey = (documentType === 'A65') ? 'outBiddingZone_Domain' : 'in_Domain';
-            // Capacity data ('A68') requires a different processType
             const processType = (documentType === 'A68') ? 'A33' : 'A16';
 
             const apiUrl = `https://web-api.tp.entsoe.eu/api?securityToken=${SECURITY_TOKEN}&documentType=${documentType}&processType=${processType}&${domainParamKey}=${domain}&periodStart=${periodStart}&periodEnd=${periodEnd}`;
@@ -228,15 +227,12 @@
                     fetchApiData('A68', capacityDates.start, capacityDates.end)
                 ]);
 
-                // Process Generation Data
                 const generationData = processGenerationData(generationXml);
                 updateGenerationUI(generationData);
 
-                // Process Load Data
                 const loadData = processLoadData(loadXml);
                 updateLoadChart(loadData);
                 
-                // Process Capacity Data
                 const capacityData = processCapacityData(capacityXml);
                 updateCapacityChart(capacityData);
 
@@ -278,12 +274,22 @@
             const series = xmlDoc.querySelector('TimeSeries');
             if (!series) throw new Error("No load data found.");
 
+            const resolution = series.querySelector('resolution')?.textContent;
             const points = series.querySelectorAll('Point');
             const labels = [];
             const data = [];
+
+            let minutesIncrement = 60; // Default to hourly
+            if (resolution === 'PT30M') minutesIncrement = 30;
+            if (resolution === 'PT15M') minutesIncrement = 15;
+
             points.forEach(point => {
-                const hour = parseInt(point.querySelector('position').textContent, 10) - 1;
-                labels.push(`${String(hour).padStart(2, '0')}:00`);
+                const position = parseInt(point.querySelector('position').textContent, 10);
+                const totalMinutes = (position - 1) * minutesIncrement;
+                const hour = Math.floor(totalMinutes / 60);
+                const minute = totalMinutes % 60;
+
+                labels.push(`${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`);
                 data.push(parseInt(point.querySelector('quantity').textContent, 10));
             });
             return { labels, data };
@@ -294,7 +300,7 @@
             if (reasonNode) throw new Error(`API Error (Capacity): ${reasonNode.textContent}`);
 
             const series = xmlDoc.querySelectorAll('TimeSeries');
-            if (series.length === 0) return {}; // Return empty object if no capacity data, not an error
+            if (series.length === 0) return {};
 
             const capacityData = {};
 
@@ -433,7 +439,6 @@
         }
         
         function updateCapacityChart(capacityData) {
-            // Check if capacityData is empty
             if (Object.keys(capacityData).length === 0) {
                 document.getElementById('capacityChart').parentElement.parentElement.style.display = 'none';
                 return;
