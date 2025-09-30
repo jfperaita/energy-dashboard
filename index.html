@@ -90,7 +90,7 @@
         </main>
 
         <footer class="text-center mt-12">
-            <p class="text-sm text-gray-500">Data provided by the <a href="https://transparency.entsoe.eu/" target="_blank" rel="noopener noreferrer" class="underline hover:text-blue-400">ENTSO-E Transparency Platform</a>. Dashboard by <a href="https://github.com/jfperaita" target="_blank" rel="noopener noreferrer" class="underline hover:text-blue-400">jfperaita</a>.</p>
+            <p class="text-sm text-gray-500">Data provided by the <a href="https://transparency.entsoe.eu/" target="_blank" rel="noopener noreferrer" class="underline hover:text-blue-400">ENTSO-E Transparency Platform</a>.</p>
         </footer>
     </div>
 
@@ -98,8 +98,8 @@
     document.addEventListener('DOMContentLoaded', () => {
 
         // --- CONFIGURATION ---
-        const SECURITY_TOKEN = "709241ab-e674-4acc-ac81-6a8dc984bd98"; // <-- Your API token is now active.
-        const REFRESH_INTERVAL_SECONDS = 60; // Refresh every 60 seconds
+        const SECURITY_TOKEN = "709241ab-e674-4acc-ac81-6a8dc984bd98"; 
+        const REFRESH_INTERVAL_SECONDS = 300; // Refresh every 5 minutes
 
         const loadingState = document.getElementById('loading-state');
         const dataState = document.getElementById('data-state');
@@ -112,27 +112,24 @@
         let generationMixChart = null;
 
         const generationTypeMapping = {
-            'B01': { name: 'Biomass', color: '#166534' }, // green-800
-            'B09': { name: 'Geothermal', color: '#7f1d1d' }, // red-900
+            'B01': { name: 'Biomass', color: '#166534' },
+            'B09': { name: 'Geothermal', color: '#7f1d1d' },
             'B10': { name: 'Hydro Pumped Storage', color: '#367280' },
-            'B11': { name: 'Hydro Run-of-river', color: '#2563eb' }, // blue-600
-            'B12': { name: 'Hydro Water Reservoir', color: '#3b82f6' }, // blue-500
-            'B14': { name: 'Nuclear', color: '#be123c' }, // rose-700
-            'B15': { name: 'Other renewable', color: '#15803d' }, // green-700
-            'B16': { name: 'Solar', color: '#f59e0b' }, // amber-500
-            'B18': { name: 'Wind Offshore', color: '#22d3ee' }, // cyan-400
-            'B19': { name: 'Wind Onshore', color: '#67e8f9' }, // cyan-300
-            'B04': { name: 'Fossil Gas', color: '#a16207' }, // yellow-700
-            'B05': { name: 'Fossil Hard coal', color: '#374151' }, // gray-700
-            'B06': { name: 'Fossil Oil', color: '#1f2937' }, // gray-800
-            'B08': { name: 'Fossil Peat', color: '#44403c' }, // stone-700
-            // Combine Fossil types for simplicity if needed
+            'B11': { name: 'Hydro Run-of-river', color: '#2563eb' },
+            'B12': { name: 'Hydro Water Reservoir', color: '#3b82f6' },
+            'B14': { name: 'Nuclear', color: '#be123c' },
+            'B15': { name: 'Other renewable', color: '#15803d' },
+            'B16': { name: 'Solar', color: '#f59e0b' },
+            'B18': { name: 'Wind Offshore', color: '#22d3ee' },
+            'B19': { name: 'Wind Onshore', color: '#67e8f9' },
+            'B04': { name: 'Fossil Gas', color: '#a16207' },
+            'B05': { name: 'Fossil Hard coal', color: '#374151' },
+            'B06': { name: 'Fossil Oil', color: '#1f2937' },
+            'B08': { name: 'Fossil Peat', color: '#44403c' },
             'Fossil': { name: 'Fossil Fuels', color: '#78716c' },
-            // Combine Hydro types
             'Hydro': { name: 'Hydro', color: '#2563eb'},
-            // Combine Wind types
             'Wind': { name: 'Wind', color: '#22d3ee' },
-            'Other': { name: 'Other', color: '#a8a29e' } // stone-400
+            'Other': { name: 'Other', color: '#a8a29e' }
         };
 
         function displayError(message) {
@@ -142,19 +139,25 @@
             dataState.classList.add('hidden');
         }
 
+        // --- FIXED DATE RANGE FUNCTION ---
         function getApiDateRange() {
-            const now = new Date();
-            const end = new Date(now);
-            const start = new Date(now);
-            start.setMinutes(now.getMinutes() - 15); // Get data for the last 15 minutes to ensure we get the latest point
+            const end = new Date();
+            // Go back 2 hours to ensure we get the most recent completed data interval
+            const start = new Date(end.getTime() - (2 * 60 * 60 * 1000)); 
 
             const formatDate = (date) => {
-                return date.toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[:-]/g, '').slice(0, 12);
-            }
+                // Formats to YYYYMMDDHHMM as required by the API
+                return date.toISOString().replace(/[:T.-]/g, '').slice(0, 12);
+            };
+
             return { start: formatDate(start), end: formatDate(end) };
         }
 
         async function fetchData() {
+            loadingState.classList.remove('hidden');
+            errorMessageEl.classList.add('hidden');
+            dataState.classList.add('hidden');
+
             if (!SECURITY_TOKEN) {
                 displayError("API Token is not configured.");
                 return;
@@ -162,32 +165,29 @@
 
             const { start, end } = getApiDateRange();
             const domain = '10YES-REE------0'; // Spain
-
-            // Fix: add interval parameter
-            const interval = 'PT60M'; // 60 minutes, can try PT15M for 15min if needed
             const proxyUrl = 'https://api.allorigins.win/raw?url=';
-            const apiUrl = `https://web-api.tp.entsoe.eu/api?securityToken=${SECURITY_TOKEN}&documentType=A75&processType=A16&in_Domain=${domain}&periodStart=${start}&periodEnd=${end}&interval=${interval}`;
+            const apiUrl = `https://web-api.tp.entsoe.eu/api?securityToken=${SECURITY_TOKEN}&documentType=A75&processType=A16&in_Domain=${domain}&periodStart=${start}&periodEnd=${end}`;
 
             try {
                 const response = await fetch(proxyUrl + encodeURIComponent(apiUrl));
-                if (!response.ok) throw new Error(`Network error: ${response.statusText}`);
+                if (!response.ok) throw new Error(`Network error: ${response.statusText} (Code: ${response.status})`);
 
                 const xmlText = await response.text();
                 const parser = new DOMParser();
                 const xmlDoc = parser.parseFromString(xmlText, "application/xml");
                 
-                const reasonNode = xmlDoc.querySelector('Reason');
-                if (reasonNode && reasonNode.querySelector('text')) {
-                    throw new Error(`API Error: ${reasonNode.querySelector('text').textContent}`);
+                const reasonNode = xmlDoc.querySelector('Reason > text');
+                if (reasonNode) {
+                    throw new Error(`API Error: ${reasonNode.textContent}`);
                 }
 
                 const series = xmlDoc.querySelectorAll('TimeSeries');
-                if (series.length === 0) throw new Error("No generation data found in the response. The API might be temporarily unavailable.");
+                if (series.length === 0) throw new Error("No generation data found in the response. The API might be temporarily unavailable or the data for the requested period is missing.");
 
                 const generationData = Array.from(series).map(s => {
                     const typeCode = s.querySelector('MktPSRType > psrType').textContent;
                     const points = s.querySelectorAll('Point');
-                    const latestPoint = points[points.length - 1]; // Get the most recent value
+                    const latestPoint = points[points.length - 1];
                     if (!latestPoint) return null;
                     return {
                         type: generationTypeMapping[typeCode]?.name || 'Other',
@@ -208,10 +208,10 @@
         }
 
         function processAndDisplayData(data) {
-            const aggregatedData = {
-                'Solar': 0, 'Wind': 0, 'Hydro': 0, 'Biomass': 0, 'Nuclear': 0, 
-                'Fossil Fuels': 0, 'Geothermal': 0, 'Other': 0
-            };
+             const aggregatedData = {
+                 'Solar': 0, 'Wind': 0, 'Hydro': 0, 'Biomass': 0, 'Nuclear': 0, 
+                 'Fossil Fuels': 0, 'Geothermal': 0, 'Other': 0
+             };
 
             data.forEach(item => {
                 if (item.type.includes('Solar')) aggregatedData['Solar'] += item.value;
@@ -226,7 +226,7 @@
 
             const finalData = Object.entries(aggregatedData)
                 .map(([name, value]) => ({ name, value }))
-                .filter(item => item.value > 10) // Filter out very small values to keep the chart clean
+                .filter(item => item.value > 10)
                 .sort((a, b) => b.value - a.value);
 
             updateUI(finalData);
@@ -235,18 +235,18 @@
         function updateUI(data) {
             loadingState.classList.add('hidden');
             dataState.classList.remove('hidden');
+            errorMessageEl.classList.add('hidden');
 
             const totalProduction = data.reduce((sum, item) => sum + item.value, 0);
             totalProductionEl.textContent = `${totalProduction.toLocaleString()} MW`;
 
             lastUpdatedEl.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
 
-            // Update Legend
             legendContainer.innerHTML = '';
             data.forEach(item => {
                 const typeInfo = Object.values(generationTypeMapping).find(t => t.name === item.name);
                 const color = typeInfo ? typeInfo.color : '#a8a29e';
-                const percentage = ((item.value / totalProduction) * 100).toFixed(1);
+                const percentage = totalProduction > 0 ? ((item.value / totalProduction) * 100).toFixed(1) : 0;
 
                 const legendEl = document.createElement('div');
                 legendEl.className = 'legend-item text-gray-300';
@@ -259,7 +259,6 @@
                 legendContainer.appendChild(legendEl);
             });
 
-            // Update Chart
             createOrUpdateChart(data);
         }
 
@@ -267,8 +266,8 @@
             const labels = data.map(item => item.name);
             const values = data.map(item => item.value);
             const colors = data.map(item => {
-                const typeInfo = Object.values(generationTypeMapping).find(t => t.name === item.name);
-                return typeInfo ? typeInfo.color : '#a8a29e';
+                 const typeInfo = Object.values(generationTypeMapping).find(t => t.name === item.name);
+                 return typeInfo ? typeInfo.color : '#a8a29e';
             });
             
             const chartData = {
@@ -276,7 +275,7 @@
                 datasets: [{
                     data: values,
                     backgroundColor: colors,
-                    borderColor: '#4b5563', // gray-600
+                    borderColor: '#4b5563',
                     borderWidth: 2,
                     hoverOffset: 4
                 }]
@@ -296,7 +295,7 @@
                                 const label = context.label || '';
                                 const value = context.parsed;
                                 const total = context.chart.getDatasetMeta(0).total;
-                                const percentage = ((value / total) * 100).toFixed(1);
+                                const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
                                 return `${label}: ${value.toLocaleString()} MW (${percentage}%)`;
                             }
                         }
@@ -316,10 +315,10 @@
             }
         }
 
-        // Initial fetch and set interval for refreshing
         fetchData();
         setInterval(fetchData, REFRESH_INTERVAL_SECONDS * 1000);
     });
     </script>
 </body>
 </html>
+
