@@ -174,7 +174,6 @@
         
         function getLoadApiDateRange() {
             const now = new Date();
-            // Request data from the beginning of today (UTC) to the beginning of tomorrow (UTC)
             const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
             const end = new Date(start);
             end.setUTCDate(end.getUTCDate() + 1);
@@ -194,10 +193,11 @@
             const domain = '10YES-REE------0'; // Spain
             const proxyUrl = 'https://api.allorigins.win/raw?url=';
             
-            // The domain parameter name changes based on the document type
             const domainParamKey = (documentType === 'A65') ? 'outBiddingZone_Domain' : 'in_Domain';
+            // Capacity data ('A68') requires a different processType
+            const processType = (documentType === 'A68') ? 'A33' : 'A16';
 
-            const apiUrl = `https://web-api.tp.entsoe.eu/api?securityToken=${SECURITY_TOKEN}&documentType=${documentType}&processType=A16&${domainParamKey}=${domain}&periodStart=${periodStart}&periodEnd=${periodEnd}`;
+            const apiUrl = `https://web-api.tp.entsoe.eu/api?securityToken=${SECURITY_TOKEN}&documentType=${documentType}&processType=${processType}&${domainParamKey}=${domain}&periodStart=${periodStart}&periodEnd=${periodEnd}`;
 
             const response = await fetch(proxyUrl + encodeURIComponent(apiUrl));
             if (!response.ok) throw new Error(`Network error: ${response.statusText} (Code: ${response.status})`);
@@ -294,7 +294,7 @@
             if (reasonNode) throw new Error(`API Error (Capacity): ${reasonNode.textContent}`);
 
             const series = xmlDoc.querySelectorAll('TimeSeries');
-            if (series.length === 0) throw new Error("No installed capacity data found.");
+            if (series.length === 0) return {}; // Return empty object if no capacity data, not an error
 
             const capacityData = {};
 
@@ -308,8 +308,7 @@
                     capacityData[typeName] += value;
                 }
             });
-
-            if (Object.keys(capacityData).length === 0) throw new Error("Capacity data points are empty.");
+            
             return capacityData;
         }
 
@@ -434,6 +433,15 @@
         }
         
         function updateCapacityChart(capacityData) {
+            // Check if capacityData is empty
+            if (Object.keys(capacityData).length === 0) {
+                document.getElementById('capacityChart').parentElement.parentElement.style.display = 'none';
+                return;
+            } else {
+                 document.getElementById('capacityChart').parentElement.parentElement.style.display = 'block';
+            }
+
+
             const aggregatedData = {
                 'Solar': 0, 'Wind': 0, 'Hydro': 0, 'Biomass': 0, 'Nuclear': 0,
                 'Fossil Fuels': 0, 'Geothermal': 0, 'Other': 0
