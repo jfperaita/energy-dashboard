@@ -141,12 +141,16 @@
 
         // --- FIXED DATE RANGE FUNCTION ---
         function getApiDateRange() {
-            const end = new Date();
-            // Go back 2 hours to ensure we get the most recent completed data interval
-            const start = new Date(end.getTime() - (2 * 60 * 60 * 1000)); 
+            const now = new Date();
+            
+            // Set end time to the beginning of the current hour in UTC
+            const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours()));
+            
+            // Set start time to 2 hours before the end time
+            const start = new Date(end.getTime() - (2 * 60 * 60 * 1000));
 
             const formatDate = (date) => {
-                // Formats to YYYYMMDDHHMM as required by the API
+                // Formats to YYYYMMDDHHMM (UTC)
                 return date.toISOString().replace(/[:T.-]/g, '').slice(0, 12);
             };
 
