@@ -105,15 +105,8 @@
             'Other': { name: 'Other', color: '#a8a29e' }
         };
         
-        // Helper function to get a color for a specific PSR Type code
         function getColorForType(type) {
-             if (type.includes('Solar')) return generationTypeMapping['Solar'].color;
-             if (type.includes('Wind')) return generationTypeMapping['Wind'].color;
-             if (type.includes('Hydro')) return generationTypeMapping['Hydro'].color;
-             if (type.includes('Nuclear')) return generationTypeMapping['Nuclear'].color;
-             if (type.includes('Fossil') || type.includes('Gas') || type.includes('Coal') || type.includes('Oil')) return generationTypeMapping['Fossil Fuels'].color;
-             if (type.includes('Biomass')) return generationTypeMapping['Biomass'].color;
-             return generationTypeMapping['Other'].color;
+             return generationTypeMapping[type]?.color || generationTypeMapping['Other'].color;
         }
 
         function displayError(message) {
@@ -194,6 +187,23 @@
                 displayError(error.message);
             }
         }
+        
+        function getCategoryForPsrType(psrType) {
+            const mapping = {
+                'Solar': ['B16'],
+                'Wind': ['B18', 'B19'],
+                'Hydro': ['B10', 'B11', 'B12'],
+                'Nuclear': ['B14'],
+                'Fossil Fuels': ['B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08'],
+                'Biomass': ['B01'],
+            };
+            for (const category in mapping) {
+                if (mapping[category].includes(psrType)) {
+                    return category;
+                }
+            }
+            return 'Other'; // Default for Geothermal, Waste, Other renewable, etc.
+        }
 
         function processTimeSeriesData(generationXml, loadXml) {
              const genReasonNode = generationXml.querySelector('Reason > text');
@@ -205,7 +215,6 @@
              const loadSeries = loadXml.querySelector('TimeSeries');
              if (genSeries.length === 0 || !loadSeries) throw new Error("Generation or load data is missing from API response.");
 
-             // Get time labels and resolution from the load data
              const resolution = loadSeries.querySelector('resolution')?.textContent;
              let minutesIncrement = 60;
              if (resolution === 'PT30M') minutesIncrement = 30;
@@ -216,28 +225,8 @@
                  return new Date(startTime.getTime() + i * minutesIncrement * 60 * 1000);
              });
 
-             // Process load data
              const loadData = Array.from(loadSeries.querySelectorAll('Point')).map(p => parseInt(p.querySelector('quantity').textContent, 10));
 
-             // Process generation data
-             const datasets = {};
-
-             genSeries.forEach(series => {
-                const psrType = series.querySelector('MktPSRType > psrType')?.textContent;
-                const typeName = series.querySelector('inBiddingZone_Domain.v') ? 'Imports' : (generationTypeMapping[psrType]?.name || 'Other');
-                
-                const points = Array.from(series.querySelectorAll('Point')).map(p => parseInt(p.querySelector('quantity').textContent, 10));
-
-                if (!datasets[typeName]) {
-                    datasets[typeName] = new Array(labels.length).fill(0);
-                }
-                for (let i = 0; i < points.length; i++) {
-                    datasets[typeName][i] += points[i];
-                }
-             });
-             
-             // Aggregate smaller categories into a single 'Other'
-             const finalDatasets = {};
              const aggregatedData = {
                 'Solar': new Array(labels.length).fill(0),
                 'Wind': new Array(labels.length).fill(0),
@@ -248,20 +237,23 @@
                 'Other': new Array(labels.length).fill(0)
              };
 
-            for (const typeName in datasets) {
-                const targetCategory = Object.values(generationTypeMapping).find(m => typeName.includes(m.name))?.name || 'Other';
-                for (let i = 0; i < labels.length; i++) {
-                    aggregatedData[targetCategory][i] += datasets[typeName][i];
+             genSeries.forEach(series => {
+                const psrType = series.querySelector('MktPSRType > psrType')?.textContent;
+                if (!psrType) return;
+                
+                const category = getCategoryForPsrType(psrType);
+                const points = Array.from(series.querySelectorAll('Point')).map(p => parseInt(p.querySelector('quantity').textContent, 10));
+
+                for (let i = 0; i < points.length && i < labels.length; i++) {
+                    aggregatedData[category][i] += points[i];
                 }
-            }
+             });
 
              return { labels, datasets: aggregatedData, loadData };
         }
         
         function updateDailyMixChart({ labels, datasets, loadData }) {
             const chartDatasets = [];
-
-            // Order for stacking
             const generationOrder = ['Hydro', 'Other', 'Biomass', 'Fossil Fuels', 'Nuclear', 'Wind', 'Solar'];
 
             generationOrder.forEach(name => {
@@ -278,16 +270,15 @@
                 }
             });
 
-            // Add the load data as a line on top
             chartDatasets.push({
                 label: 'Consumption (Load)',
                 data: loadData,
-                borderColor: '#60a5fa', // blue-400
+                borderColor: '#60a5fa',
                 backgroundColor: 'transparent',
                 borderWidth: 3,
                 pointRadius: 0,
-                type: 'line',
-                order: -1 // Render on top
+                fill: false,
+                order: -1
             });
 
             const chartData = { labels: labels, datasets: chartDatasets };
@@ -307,10 +298,7 @@
                     },
                     x: {
                         type: 'time',
-                        time: {
-                            unit: 'hour',
-                            displayFormats: { hour: 'HH:mm' }
-                        },
+                        time: { unit: 'hour', displayFormats: { hour: 'HH:mm' } },
                         ticks: { color: '#9ca3af' },
                         grid: { color: 'rgba(156, 163, 175, 0.2)' }
                     }
@@ -335,7 +323,7 @@
                 dailyMixChart.options = chartOptions;
                 dailyMixChart.update();
             } else {
-                dailyMixChart = new Chart(dailyMixCanvas, { type: 'bar', data: chartData, options: chartOptions });
+                dailyMixChart = new Chart(dailyMixCanvas, { type: 'line', data: chartData, options: chartOptions });
             }
         }
         
@@ -348,27 +336,16 @@
              Array.from(series).forEach(s => {
                  const typeCode = s.querySelector('MktPSRType > psrType')?.textContent;
                  if (!typeCode) return;
-                 const typeName = Object.values(generationTypeMapping).find(m => typeCode.startsWith('B') && typeNameIncludes(typeCode, m.name))?.name || 'Other';
+                 const category = getCategoryForPsrType(typeCode);
                  const point = s.querySelector('Point');
                  if (point) {
                      const value = parseInt(point.querySelector('quantity').textContent, 10);
-                     if (!capacityData[typeName]) capacityData[typeName] = 0;
-                     capacityData[typeName] += value;
+                     if (!capacityData[category]) capacityData[category] = 0;
+                     capacityData[category] += value;
                  }
              });
              return capacityData;
         }
-
-        // Helper for capacity processing
-        function typeNameIncludes(code, name) {
-            // Simplified mapping for aggregation
-            const mapping = {
-                'Solar': ['B16'], 'Wind': ['B18', 'B19'], 'Hydro': ['B10', 'B11', 'B12'],
-                'Nuclear': ['B14'], 'Fossil Fuels': ['B04', 'B05', 'B06', 'B08'], 'Biomass': ['B01']
-            };
-            return Object.entries(mapping).find(([cat, codes]) => name === cat && codes.includes(code));
-        }
-
 
         function updateCapacityChart(capacityData) {
             if (Object.keys(capacityData).length === 0) {
@@ -378,16 +355,7 @@
                  document.getElementById('capacityChart').parentElement.parentElement.style.display = 'block';
             }
 
-            const aggregatedData = {
-                'Solar': 0, 'Wind': 0, 'Hydro': 0, 'Biomass': 0, 'Nuclear': 0,
-                'Fossil Fuels': 0, 'Other': 0
-            };
-            for (const typeName in capacityData) {
-                const targetCategory = Object.values(generationTypeMapping).find(m => typeName.includes(m.name))?.name || 'Other';
-                aggregatedData[targetCategory] += capacityData[typeName];
-            }
-
-            const finalData = Object.entries(aggregatedData)
+            const finalData = Object.entries(capacityData)
                 .map(([name, value]) => ({ name, value }))
                 .filter(item => item.value > 0)
                 .sort((a, b) => b.value - a.value);
