@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Live Electricity Generation - Spain</title>
+    <title>Live Electricity Dashboard - Spain</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -47,8 +47,8 @@
     <div class="container mx-auto p-4 md:p-8 max-w-7xl">
         
         <header class="text-center mb-8">
-            <h1 class="text-3xl md:text-4xl font-bold text-white">Live Electricity Generation Dashboard</h1>
-            <p class="text-lg text-gray-400 mt-2">Real-time energy mix for Spain (Mainland)</p>
+            <h1 class="text-3xl md:text-4xl font-bold text-white">Live Electricity Dashboard</h1>
+            <p class="text-lg text-gray-400 mt-2">Real-time energy mix, consumption & capacity for Spain (Mainland)</p>
             <p id="last-updated" class="text-sm text-gray-500 mt-2">Last updated: --:--:--</p>
         </header>
 
@@ -59,7 +59,8 @@
             </div>
             
             <div id="data-state" class="hidden">
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <!-- Top Row: Generation Mix -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
                     <!-- Generation Mix Chart -->
                     <div class="lg:col-span-2 bg-gray-800 p-4 md:p-6 rounded-2xl">
                         <h3 class="text-xl font-semibold mb-4 text-center text-white">Current Generation Mix</h3>
@@ -78,6 +79,22 @@
                                 <span id="total-production" class="font-bold text-lg text-blue-400">-- MW</span>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Middle Row: Load Curve -->
+                <div class="bg-gray-800 p-4 md:p-6 rounded-2xl mb-8">
+                    <h3 class="text-xl font-semibold mb-4 text-center text-white">Today's Electricity Consumption (Load)</h3>
+                    <div class="chart-container" style="height: 300px;">
+                        <canvas id="loadChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Bottom Row: Installed Capacity -->
+                <div class="bg-gray-800 p-4 md:p-6 rounded-2xl">
+                    <h3 class="text-xl font-semibold mb-4 text-center text-white">Installed Generation Capacity</h3>
+                    <div class="chart-container" style="height: 300px;">
+                        <canvas id="capacityChart"></canvas>
                     </div>
                 </div>
             </div>
@@ -101,6 +118,7 @@
         const SECURITY_TOKEN = "709241ab-e674-4acc-ac81-6a8dc984bd98"; 
         const REFRESH_INTERVAL_SECONDS = 300; // Refresh every 5 minutes
 
+        // --- DOM ELEMENTS ---
         const loadingState = document.getElementById('loading-state');
         const dataState = document.getElementById('data-state');
         const errorMessageEl = document.getElementById('error-message');
@@ -109,7 +127,11 @@
         const totalProductionEl = document.getElementById('total-production');
         const lastUpdatedEl = document.getElementById('last-updated');
         const generationMixCanvas = document.getElementById('generationMixChart');
+        const loadCanvas = document.getElementById('loadChart');
+        const capacityCanvas = document.getElementById('capacityChart');
         let generationMixChart = null;
+        let loadChart = null;
+        let capacityChart = null;
 
         const generationTypeMapping = {
             'B01': { name: 'Biomass', color: '#166534' },
@@ -139,25 +161,47 @@
             dataState.classList.add('hidden');
         }
 
-        // --- FIXED DATE RANGE FUNCTION ---
-        function getApiDateRange() {
+        const formatDate = (date) => {
+            return date.toISOString().replace(/[:T.-]/g, '').slice(0, 12);
+        };
+
+        function getGenerationApiDateRange() {
             const now = new Date();
-            
-            // Set end time to the beginning of the current hour in UTC
             const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours()));
-            
-            // Set start time to 2 hours before the end time
             const start = new Date(end.getTime() - (2 * 60 * 60 * 1000));
-
-            const formatDate = (date) => {
-                // Formats to YYYYMMDDHHMM (UTC)
-                return date.toISOString().replace(/[:T.-]/g, '').slice(0, 12);
-            };
-
+            return { start: formatDate(start), end: formatDate(end) };
+        }
+        
+        function getLoadApiDateRange() {
+            const now = new Date();
+            const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
+            const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
             return { start: formatDate(start), end: formatDate(end) };
         }
 
-        async function fetchData() {
+        function getCapacityApiDateRange() {
+            const now = new Date();
+            const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
+            const start = new Date(end);
+            start.setUTCDate(start.getUTCDate() - 365);
+            start.setUTCHours(0,0,0,0);
+            return { start: formatDate(start), end: formatDate(end) };
+        }
+
+        async function fetchApiData(documentType, periodStart, periodEnd) {
+            const domain = '10YES-REE------0'; // Spain
+            const proxyUrl = 'https://api.allorigins.win/raw?url=';
+            const apiUrl = `https://web-api.tp.entsoe.eu/api?securityToken=${SECURITY_TOKEN}&documentType=${documentType}&processType=A16&in_Domain=${domain}&periodStart=${periodStart}&periodEnd=${periodEnd}`;
+
+            const response = await fetch(proxyUrl + encodeURIComponent(apiUrl));
+            if (!response.ok) throw new Error(`Network error: ${response.statusText} (Code: ${response.status})`);
+            
+            const xmlText = await response.text();
+            const parser = new DOMParser();
+            return parser.parseFromString(xmlText, "application/xml");
+        }
+
+        async function fetchAllData() {
             loadingState.classList.remove('hidden');
             errorMessageEl.classList.add('hidden');
             dataState.classList.add('hidden');
@@ -167,43 +211,32 @@
                 return;
             }
 
-            const { start, end } = getApiDateRange();
-            const domain = '10YES-REE------0'; // Spain
-            const proxyUrl = 'https://api.allorigins.win/raw?url=';
-            const apiUrl = `https://web-api.tp.entsoe.eu/api?securityToken=${SECURITY_TOKEN}&documentType=A75&processType=A16&in_Domain=${domain}&periodStart=${start}&periodEnd=${end}`;
-
             try {
-                const response = await fetch(proxyUrl + encodeURIComponent(apiUrl));
-                if (!response.ok) throw new Error(`Network error: ${response.statusText} (Code: ${response.status})`);
+                const genDates = getGenerationApiDateRange();
+                const loadDates = getLoadApiDateRange();
+                const capacityDates = getCapacityApiDateRange();
 
-                const xmlText = await response.text();
-                const parser = new DOMParser();
-                const xmlDoc = parser.parseFromString(xmlText, "application/xml");
-                
-                const reasonNode = xmlDoc.querySelector('Reason > text');
-                if (reasonNode) {
-                    throw new Error(`API Error: ${reasonNode.textContent}`);
-                }
+                const [generationXml, loadXml, capacityXml] = await Promise.all([
+                    fetchApiData('A75', genDates.start, genDates.end),
+                    fetchApiData('A65', loadDates.start, loadDates.end),
+                    fetchApiData('A68', capacityDates.start, capacityDates.end)
+                ]);
 
-                const series = xmlDoc.querySelectorAll('TimeSeries');
-                if (series.length === 0) throw new Error("No generation data found in the response. The API might be temporarily unavailable or the data for the requested period is missing.");
+                // Process Generation Data
+                const generationData = processGenerationData(generationXml);
+                updateGenerationUI(generationData);
 
-                const generationData = Array.from(series).map(s => {
-                    const typeCode = s.querySelector('MktPSRType > psrType').textContent;
-                    const points = s.querySelectorAll('Point');
-                    const latestPoint = points[points.length - 1];
-                    if (!latestPoint) return null;
-                    return {
-                        type: generationTypeMapping[typeCode]?.name || 'Other',
-                        value: parseInt(latestPoint.querySelector('quantity').textContent, 10)
-                    };
-                }).filter(d => d && d.value > 0);
+                // Process Load Data
+                const loadData = processLoadData(loadXml);
+                updateLoadChart(loadData);
                 
-                if (generationData.length === 0) {
-                     throw new Error("Data was returned, but it contained no valid generation points for the current timeframe.");
-                }
-                
-                processAndDisplayData(generationData);
+                // Process Capacity Data
+                const capacityData = processCapacityData(capacityXml);
+                updateCapacityChart(capacityData);
+
+                dataState.classList.remove('hidden');
+                loadingState.classList.add('hidden');
+                lastUpdatedEl.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
 
             } catch (error) {
                 console.error("Fetch Error:", error);
@@ -211,12 +244,74 @@
             }
         }
 
-        function processAndDisplayData(data) {
-             const aggregatedData = {
+        function processGenerationData(xmlDoc) {
+            const reasonNode = xmlDoc.querySelector('Reason > text');
+            if (reasonNode) throw new Error(`API Error (Generation): ${reasonNode.textContent}`);
+            
+            const series = xmlDoc.querySelectorAll('TimeSeries');
+            if (series.length === 0) throw new Error("No generation data found.");
+
+            const generationData = Array.from(series).map(s => {
+                const typeCode = s.querySelector('MktPSRType > psrType').textContent;
+                const points = s.querySelectorAll('Point');
+                const latestPoint = points[points.length - 1];
+                return latestPoint ? {
+                    type: generationTypeMapping[typeCode]?.name || 'Other',
+                    value: parseInt(latestPoint.querySelector('quantity').textContent, 10)
+                } : null;
+            }).filter(d => d && d.value > 0);
+
+            if (generationData.length === 0) throw new Error("Generation data points are empty.");
+            return generationData;
+        }
+
+        function processLoadData(xmlDoc) {
+            const reasonNode = xmlDoc.querySelector('Reason > text');
+            if (reasonNode) throw new Error(`API Error (Load): ${reasonNode.textContent}`);
+            
+            const series = xmlDoc.querySelector('TimeSeries');
+            if (!series) throw new Error("No load data found.");
+
+            const points = series.querySelectorAll('Point');
+            const labels = [];
+            const data = [];
+            points.forEach(point => {
+                const hour = parseInt(point.querySelector('position').textContent, 10) - 1;
+                labels.push(`${String(hour).padStart(2, '0')}:00`);
+                data.push(parseInt(point.querySelector('quantity').textContent, 10));
+            });
+            return { labels, data };
+        }
+
+        function processCapacityData(xmlDoc) {
+            const reasonNode = xmlDoc.querySelector('Reason > text');
+            if (reasonNode) throw new Error(`API Error (Capacity): ${reasonNode.textContent}`);
+
+            const series = xmlDoc.querySelectorAll('TimeSeries');
+            if (series.length === 0) throw new Error("No installed capacity data found.");
+
+            const capacityData = {};
+
+            Array.from(series).forEach(s => {
+                const typeCode = s.querySelector('MktPSRType > psrType').textContent;
+                const typeName = generationTypeMapping[typeCode]?.name || 'Other';
+                const point = s.querySelector('Point');
+                if (point) {
+                    const value = parseInt(point.querySelector('quantity').textContent, 10);
+                    if (!capacityData[typeName]) capacityData[typeName] = 0;
+                    capacityData[typeName] += value;
+                }
+            });
+
+            if (Object.keys(capacityData).length === 0) throw new Error("Capacity data points are empty.");
+            return capacityData;
+        }
+
+        function updateGenerationUI(data) {
+            const aggregatedData = {
                  'Solar': 0, 'Wind': 0, 'Hydro': 0, 'Biomass': 0, 'Nuclear': 0, 
                  'Fossil Fuels': 0, 'Geothermal': 0, 'Other': 0
              };
-
             data.forEach(item => {
                 if (item.type.includes('Solar')) aggregatedData['Solar'] += item.value;
                 else if (item.type.includes('Wind')) aggregatedData['Wind'] += item.value;
@@ -224,103 +319,172 @@
                 else if (item.type.includes('Biomass')) aggregatedData['Biomass'] += item.value;
                 else if (item.type.includes('Nuclear')) aggregatedData['Nuclear'] += item.value;
                 else if (item.type.includes('Geothermal')) aggregatedData['Geothermal'] += item.value;
-                else if (item.type.includes('Fossil') || item.type.includes('coal') || item.type.includes('Gas') || item.type.includes('Oil')) aggregatedData['Fossil Fuels'] += item.value;
+                else if (item.type.includes('Fossil')) aggregatedData['Fossil Fuels'] += item.value;
                 else aggregatedData['Other'] += item.value;
             });
-
             const finalData = Object.entries(aggregatedData)
                 .map(([name, value]) => ({ name, value }))
                 .filter(item => item.value > 10)
                 .sort((a, b) => b.value - a.value);
 
-            updateUI(finalData);
-        }
-
-        function updateUI(data) {
-            loadingState.classList.add('hidden');
-            dataState.classList.remove('hidden');
-            errorMessageEl.classList.add('hidden');
-
-            const totalProduction = data.reduce((sum, item) => sum + item.value, 0);
+            const totalProduction = finalData.reduce((sum, item) => sum + item.value, 0);
             totalProductionEl.textContent = `${totalProduction.toLocaleString()} MW`;
 
-            lastUpdatedEl.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
-
             legendContainer.innerHTML = '';
-            data.forEach(item => {
+            finalData.forEach(item => {
                 const typeInfo = Object.values(generationTypeMapping).find(t => t.name === item.name);
                 const color = typeInfo ? typeInfo.color : '#a8a29e';
                 const percentage = totalProduction > 0 ? ((item.value / totalProduction) * 100).toFixed(1) : 0;
-
-                const legendEl = document.createElement('div');
-                legendEl.className = 'legend-item text-gray-300';
-                legendEl.innerHTML = `
-                    <div class="legend-color" style="background-color: ${color};"></div>
-                    <span class="flex-grow">${item.name}</span>
-                    <span class="font-semibold">${item.value.toLocaleString()} MW</span>
-                    <span class="w-16 text-right text-gray-400">${percentage}%</span>
-                `;
-                legendContainer.appendChild(legendEl);
+                legendContainer.innerHTML += `
+                    <div class="legend-item text-gray-300">
+                        <div class="legend-color" style="background-color: ${color};"></div>
+                        <span class="flex-grow">${item.name}</span>
+                        <span class="font-semibold">${item.value.toLocaleString()} MW</span>
+                        <span class="w-16 text-right text-gray-400">${percentage}%</span>
+                    </div>`;
             });
 
-            createOrUpdateChart(data);
+            createOrUpdateGenerationChart(finalData);
         }
 
-        function createOrUpdateChart(data) {
-            const labels = data.map(item => item.name);
-            const values = data.map(item => item.value);
-            const colors = data.map(item => {
-                 const typeInfo = Object.values(generationTypeMapping).find(t => t.name === item.name);
-                 return typeInfo ? typeInfo.color : '#a8a29e';
-            });
-            
+        function createOrUpdateGenerationChart(data) {
             const chartData = {
-                labels: labels,
+                labels: data.map(item => item.name),
                 datasets: [{
-                    data: values,
-                    backgroundColor: colors,
-                    borderColor: '#4b5563',
-                    borderWidth: 2,
-                    hoverOffset: 4
+                    data: data.map(item => item.value),
+                    backgroundColor: data.map(item => {
+                         const typeInfo = Object.values(generationTypeMapping).find(t => t.name === item.name);
+                         return typeInfo ? typeInfo.color : '#a8a29e';
+                    }),
+                    borderColor: '#4b5563', borderWidth: 2, hoverOffset: 4
                 }]
             };
-
             const chartOptions = {
-                responsive: true,
-                maintainAspectRatio: false,
-                cutout: '70%',
+                responsive: true, maintainAspectRatio: false, cutout: '70%',
                 plugins: {
                     legend: { display: false },
                     tooltip: {
-                        enabled: true,
-                        backgroundColor: '#1f2937',
+                        enabled: true, backgroundColor: '#1f2937',
                         callbacks: {
                             label: function(context) {
-                                const label = context.label || '';
-                                const value = context.parsed;
                                 const total = context.chart.getDatasetMeta(0).total;
-                                const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
-                                return `${label}: ${value.toLocaleString()} MW (${percentage}%)`;
+                                const percentage = total > 0 ? ((context.parsed / total) * 100).toFixed(1) : 0;
+                                return `${context.label}: ${context.parsed.toLocaleString()} MW (${percentage}%)`;
                             }
                         }
                     }
                 }
             };
-            
             if (generationMixChart) {
                 generationMixChart.data = chartData;
                 generationMixChart.update();
             } else {
-                generationMixChart = new Chart(generationMixCanvas, {
-                    type: 'doughnut',
-                    data: chartData,
-                    options: chartOptions
-                });
+                generationMixChart = new Chart(generationMixCanvas, { type: 'doughnut', data: chartData, options: chartOptions });
             }
         }
 
-        fetchData();
-        setInterval(fetchData, REFRESH_INTERVAL_SECONDS * 1000);
+        function updateLoadChart({ labels, data }) {
+            const chartData = {
+                labels: labels,
+                datasets: [{
+                    label: 'Total Load (MW)',
+                    data: data,
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 0
+                }]
+            };
+            const chartOptions = {
+                responsive: true, maintainAspectRatio: false,
+                scales: {
+                    y: { 
+                        beginAtZero: false,
+                        ticks: { color: '#9ca3af' },
+                        grid: { color: 'rgba(156, 163, 175, 0.2)' } 
+                    },
+                    x: {
+                        ticks: { color: '#9ca3af', maxRotation: 0, autoSkip: true, maxTicksLimit: 12 },
+                        grid: { color: 'rgba(156, 163, 175, 0.2)' }
+                    }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        enabled: true, backgroundColor: '#1f2937',
+                        callbacks: {
+                            label: (context) => `${context.dataset.label}: ${context.parsed.y.toLocaleString()} MW`
+                        }
+                    }
+                }
+            };
+            if(loadChart) {
+                loadChart.data = chartData;
+                loadChart.update();
+            } else {
+                loadChart = new Chart(loadCanvas, { type: 'line', data: chartData, options: chartOptions });
+            }
+        }
+        
+        function updateCapacityChart(capacityData) {
+            const aggregatedData = {
+                'Solar': 0, 'Wind': 0, 'Hydro': 0, 'Biomass': 0, 'Nuclear': 0,
+                'Fossil Fuels': 0, 'Geothermal': 0, 'Other': 0
+            };
+            for (const [name, value] of Object.entries(capacityData)) {
+                if (name.includes('Solar')) aggregatedData['Solar'] += value;
+                else if (name.includes('Wind')) aggregatedData['Wind'] += value;
+                else if (name.includes('Hydro')) aggregatedData['Hydro'] += value;
+                else if (name.includes('Biomass')) aggregatedData['Biomass'] += value;
+                else if (name.includes('Nuclear')) aggregatedData['Nuclear'] += value;
+                else if (name.includes('Geothermal')) aggregatedData['Geothermal'] += value;
+                else if (name.includes('Fossil')) aggregatedData['Fossil Fuels'] += value;
+                else aggregatedData['Other'] += value;
+            }
+            const finalData = Object.entries(aggregatedData)
+                .map(([name, value]) => ({ name, value }))
+                .filter(item => item.value > 0)
+                .sort((a, b) => b.value - a.value);
+
+            const chartData = {
+                labels: finalData.map(item => item.name),
+                datasets: [{
+                    label: 'Installed Capacity (MW)',
+                    data: finalData.map(item => item.value),
+                    backgroundColor: finalData.map(item => {
+                        const typeInfo = Object.values(generationTypeMapping).find(t => t.name === item.name);
+                        return typeInfo ? typeInfo.color : '#a8a29e';
+                    })
+                }]
+            };
+            const chartOptions = {
+                indexAxis: 'y',
+                responsive: true, maintainAspectRatio: false,
+                scales: {
+                    x: { ticks: { color: '#9ca3af' }, grid: { color: 'rgba(156, 163, 175, 0.2)' } },
+                    y: { ticks: { color: '#9ca3af' }, grid: { display: false } }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        enabled: true, backgroundColor: '#1f2937',
+                        callbacks: {
+                            label: (context) => `${context.label}: ${context.parsed.x.toLocaleString()} MW`
+                        }
+                    }
+                }
+            };
+            if (capacityChart) {
+                capacityChart.data = chartData;
+                capacityChart.update();
+            } else {
+                capacityChart = new Chart(capacityCanvas, { type: 'bar', data: chartData, options: chartOptions });
+            }
+        }
+
+        fetchAllData();
+        setInterval(fetchAllData, REFRESH_INTERVAL_SECONDS * 1000);
     });
     </script>
 </body>
